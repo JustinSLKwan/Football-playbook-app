@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Football Play Designer</title>
+<style>
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: #121212;
+        color: #ffffff;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        touch-action: none;
+    }
+    h1 { margin: 20px 0 10px; color: #fff; }
+    h2 { margin: 15px 0 10px; }
+    
+    /* View Containers */
+    #landing-page, #designer-page {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    #designer-page { display: none; }
+
+    /* Landing Page Grid */
+    #play-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 20px;
+        width: 90%;
+        max-width: 800px;
+        margin-top: 20px;
+    }
+    .play-card {
+        background: #222;
+        border: 2px solid #444;
+        border-radius: 8px;
+        overflow: hidden;
+        cursor: pointer;
+        transition: transform 0.2s, border-color 0.2s;
+    }
+    .play-card:hover {
+        transform: translateY(-5px);
+        border-color: #007aff;
+    }
+    .play-card img {
+        width: 100%;
+        height: auto;
+        display: block;
+        border-bottom: 2px solid #444;
+    }
+    .play-card .play-info {
+        padding: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .play-card h3 {
+        margin: 0;
+        font-size: 16px;
+    }
+    .delete-play {
+        background: #d32f2f;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 5px 10px;
+        cursor: pointer;
+        font-size: 12px;
+    }
+
+    /* Toolbar */
+    .toolbar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 15px;
+        flex-wrap: wrap;
+        justify-content: center;
+        padding: 0 10px;
+        max-width: 600px; /* Reduced for vertical layout */
+        align-items: center;
+    }
+    button, input[type="text"] {
+        background-color: #333;
+        color: white;
+        border: 2px solid #555;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    input[type="text"] { background-color: #222; cursor: text; width: 120px; }
+    input[type="text"]:focus { border-color: #007aff; outline: none; }
+    
+    /* Specific Buttons */
+    button.active { background-color: #007aff; border-color: #0056b3; }
+    button#btn-back { background-color: #555; border-color: #777; }
+    button#btn-save { background-color: #007aff; border-color: #0056b3; }
+    button#btn-new-play { background-color: #2e7d32; border-color: #1b5e20; font-size: 16px; padding: 12px 20px; }
+    button#undoBtn { background-color: #555; border-color: #777; }
+    button#clearBtn { background-color: #d32f2f; border-color: #9a0007; }
+    button#presetBtn { background-color: #e6a800; border-color: #b38300; color: #000; }
+    button#def43Btn { background-color: #8e24aa; border-color: #6a1b9a; }
+
+    /* Vertical Canvas CSS */
+    canvas {
+        background-color: #1e6b3c;
+        border: 2px solid #fff;
+        border-radius: 4px;
+        width: 100%;
+        max-width: 500px;
+        aspect-ratio: 5 / 8;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        cursor: crosshair;
+        margin-bottom: 20px;
+    }
+</style>
+</head>
+<body>
+
+<!-- LANDING PAGE VIEW -->
+<div id="landing-page">
+    <h1>My Playbook</h1>
+    <button id="btn-new-play">➕ Create New Play</button>
+    <div id="play-grid">
+        <!-- Saved plays will be injected here -->
+    </div>
+</div>
+
+<!-- DESIGNER PAGE VIEW -->
+<div id="designer-page">
+    <h2>Play Designer</h2>
+    <div class="toolbar">
+        <button id="btn-back">⬅ Playbook</button>
+        <button id="btn-save">💾 Save Play</button>
+        <button id="btn-draw" class="active">Draw</button>
+        <button id="btn-o">Place (O)</button>
+        <button id="btn-x">Place (X)</button>
+        <input type="text" id="customTextInput" placeholder="Text label..." />
+        <button id="btn-text">Text</button>
+        <button id="presetBtn">Trips</button>
+        <button id="def43Btn">4-3 Def</button>
+        <button id="undoBtn">Undo</button>
+        <button id="clearBtn">Clear</button>
+    </div>
+
+    <!-- Vertical Canvas Dimensions -->
+    <canvas id="fieldCanvas" width="500" height="800"></canvas>
+</div>
+
+<script>
+    // ===== DATA MANAGEMENT (LocalStorage) =====
+    const STORAGE_KEY = 'football_plays_data_v2';
+    let savedPlays = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+    let currentPlayId = null;
+
+    // ===== CANVAS & DESIGNER STATE =====
+    const canvas = document.getElementById('fieldCanvas');
+    const ctx = canvas.getContext('2d');
+    let mode = 'draw';
+    let isDrawing = false;
+    let currentPath = [];
+    
+    let entities = []; 
+    let paths = []; 
+    let customTexts = []; 
+    let actionHistory = [];
+
+    function saveState() {
+        actionHistory.push({
+            entities: JSON.parse(JSON.stringify(entities)),
+            paths: JSON.parse(JSON.stringify(paths)),
+            customTexts: JSON.parse(JSON.stringify(customTexts))
+        });
+    }
+
+    // ===== NAVIGATION LOGIC =====
+    const landingPage = document.getElementById('landing-page');
+    const designerPage = document.getElementById('designer-page');
+    const playGrid = document.getElementById('play-grid');
+
+    function showLandingPage() {
+        landingPage.style.display = 'flex';
+        designerPage.style.display = 'none';
+        renderPlayGrid();
+    }
+
+    function showDesigner(playData = null) {
+        landingPage.style.display = 'none';
+        designerPage.style.display = 'flex';
+        
+        if (playData) {
+            currentPlayId = playData.id;
+            entities = JSON.parse(JSON.stringify(playData.entities || []));
+            paths = JSON.parse(JSON.stringify(playData.paths || []));
+            customTexts = JSON.parse(JSON.stringify(playData.customTexts || []));
+        } else {
+            currentPlayId = null;
+            entities = []; paths = []; customTexts = [];
+        }
+        
+        actionHistory = [];
+        saveState();
+        drawAll();
+    }
+
+    function renderPlayGrid() {
+        playGrid.innerHTML = '';
+        if(savedPlays.length === 0) {
+            playGrid.innerHTML = '<p style="color:#aaa;">No plays saved yet. Create one!</p>';
+            return;
+        }
+
+        savedPlays.forEach((play, index) => {
+            const card = document.createElement('div');
+            card.className = 'play-card';
+            
+            const img = document.createElement('img');
+            img.src = play.thumbnail || '';
+            img.onclick = () => showDesigner(play);
+            
+            const info = document.createElement('div');
+            info.className = 'play-info';
+            
+            const title = document.createElement('h3');
+            title.textContent = play.name;
+            title.onclick = () => showDesigner(play);
+            
+            const delBtn = document.createElement('button');
+            delBtn.className = 'delete-play';
+            delBtn.textContent = 'Del';
+            delBtn.onclick = (e) => {
+                e.stopPropagation();
+                if(confirm(`Delete "${play.name}"?`)) {
+                    savedPlays.splice(index, 1);
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedPlays));
+                    renderPlayGrid();
+                }
+            };
+
+            info.appendChild(title);
+            info.appendChild(delBtn);
+            card.appendChild(img);
+            card.appendChild(info);
+            playGrid.appendChild(card);
+        });
+    }
+
+    // ===== MENU BUTTONS =====
+    document.getElementById('btn-new-play').onclick = () => showDesigner(null);
+    document.getElementById('btn-back').onclick = () => showLandingPage();
+    
+    document.getElementById('btn-save').onclick = () => {
+        let defaultName = "New Play";
+        let playIndex = -1;
+        
+        if (currentPlayId) {
+            playIndex = savedPlays.findIndex(p => p.id === currentPlayId);
+            if (playIndex > -1) defaultName = savedPlays[playIndex].name;
+        }
+        
+        const playName = prompt("Name your play:", defaultName);
+        if (!playName) return; 
+        
+        drawAll();
+        const thumbnail = canvas.toDataURL("image/jpeg", 0.5); 
+        
+        const newPlayData = {
+            id: currentPlayId || Date.now(),
+            name: playName,
+            entities: JSON.parse(JSON.stringify(entities)),
+            paths: JSON.parse(JSON.stringify(paths)),
+            customTexts: JSON.parse(JSON.stringify(customTexts)),
+            thumbnail: thumbnail
+        };
+
+        if (playIndex > -1) savedPlays[playIndex] = newPlayData; 
+        else {
+            currentPlayId = newPlayData.id;
+            savedPlays.push(newPlayData);
+        }
+        
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(savedPlays));
+        showLandingPage();
+    };
+
+    // ===== TOOLBAR BUTTONS =====
+    document.getElementById('btn-draw').onclick = (e) => setMode('draw', e.target);
+    document.getElementById('btn-o').onclick = (e) => setMode('o', e.target);
+    document.getElementById('btn-x').onclick = (e) => setMode('x', e.target);
+    document.getElementById('btn-text').onclick = (e) => setMode('text', e.target);
+    
+    document.getElementById('clearBtn').onclick = () => { 
+        entities = []; paths = []; customTexts = [];
+        saveState(); drawAll(); 
+    };
+
+    document.getElementById('undoBtn').onclick = () => { 
+        if (actionHistory.length > 1) {
+            actionHistory.pop(); 
+            const prev = actionHistory[actionHistory.length - 1]; 
+            entities = JSON.parse(JSON.stringify(prev.entities)); 
+            paths = JSON.parse(JSON.stringify(prev.paths));       
+            customTexts = JSON.parse(JSON.stringify(prev.customTexts));
+            drawAll();
+        }
+    };
+
+    // Adjusted Vertical Presets
+    document.getElementById('presetBtn').onclick = () => {
+        const cx = canvas.width / 2; 
+        const cy = canvas.height * 0.75; // Placed low to leave room for routes
+        
+        entities.push({type: 'O', x: cx, y: cy}); // Center
+        entities.push({type: 'O', x: cx, y: cy + 30}); // QB
+        entities.push({type: 'O', x: cx + 30, y: cy + 30}); // RB
+        entities.push({type: 'O', x: cx - 40, y: cy}); // LG
+        entities.push({type: 'O', x: cx - 80, y: cy}); // LT
+        entities.push({type: 'O', x: cx + 40, y: cy}); // RG
+        entities.push({type: 'O', x: cx + 80, y: cy}); // RT
+        
+        entities.push({type: 'O', x: cx - 200, y: cy}); // WR L
+        entities.push({type: 'O', x: cx + 120, y: cy + 10}); // Slot 1
+        entities.push({type: 'O', x: cx + 170, y: cy}); // Slot 2
+        entities.push({type: 'O', x: cx + 220, y: cy - 10}); // WR R
+        
+        saveState(); drawAll();
+    };
+
+    document.getElementById('def43Btn').onclick = () => {
+        const cx = canvas.width / 2; 
+        const cy = canvas.height * 0.75; 
+        const losY = cy - 25; // Line of Scrimmage
+        
+        entities.push({type: 'X', x: cx - 25, y: losY}); // DT
+        entities.push({type: 'X', x: cx + 25, y: losY}); // DT
+        entities.push({type: 'X', x: cx - 75, y: losY}); // DE
+        entities.push({type: 'X', x: cx + 75, y: losY}); // DE
+        
+        entities.push({type: 'X', x: cx, y: losY - 45}); // Mike
+        entities.push({type: 'X', x: cx - 65, y: losY - 45}); // Will
+        entities.push({type: 'X', x: cx + 65, y: losY - 45}); // Sam
+        
+        entities.push({type: 'X', x: cx - 200, y: losY - 20}); // CB 1
+        entities.push({type: 'X', x: cx + 220, y: losY - 20}); // CB 2
+        
+        entities.push({type: 'X', x: cx - 70, y: losY - 140}); // FS
+        entities.push({type: 'X', x: cx + 70, y: losY - 140}); // SS
+        
+        saveState(); drawAll();
+    };
+
+    function setMode(newMode, btn) {
+        mode = newMode;
+        document.querySelectorAll('.toolbar button:not(#btn-back):not(#btn-save):not(#clearBtn):not(#presetBtn):not(#def43Btn):not(#undoBtn)').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    }
+
+    // ===== CANVAS DRAWING LOGIC (Vertical) =====
+    function drawField() {
+        ctx.fillStyle = '#1e6b3c';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = 2;
+        
+        // Draw horizontal yard lines going top to bottom
+        for(let i = 1; i < 12; i++) {
+            let y = i * (canvas.height / 12);
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            
+            // Hash marks (placed vertically)
+            ctx.beginPath(); ctx.moveTo(canvas.width * 0.33, y - 5); ctx.lineTo(canvas.width * 0.33, y + 5); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(canvas.width * 0.66, y - 5); ctx.lineTo(canvas.width * 0.66, y + 5); ctx.stroke();
+        }
+    }
+
+    function drawArrow(p1, p2) {
+        let angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+        ctx.beginPath(); ctx.moveTo(p2.x, p2.y);
+        ctx.lineTo(p2.x - 12 * Math.cos(angle - Math.PI/6), p2.y - 12 * Math.sin(angle - Math.PI/6));
+        ctx.lineTo(p2.x - 12 * Math.cos(angle + Math.PI/6), p2.y - 12 * Math.sin(angle + Math.PI/6));
+        ctx.fillStyle = '#ffffff'; ctx.fill();
+    }
+
+    function drawAll() {
+        drawField();
+        
+        paths.forEach(path => {
+            if(path.length < 2) return;
+            ctx.beginPath(); ctx.moveTo(path[0].x, path[0].y);
+            for(let i=1; i<path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+            ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.stroke();
+            drawArrow(path[path.length-2], path[path.length-1]);
+        });
+
+        ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        customTexts.forEach(txtObj => {
+            ctx.fillStyle = '#000000'; ctx.fillText(txtObj.text, txtObj.x + 2, txtObj.y + 2);
+            ctx.fillStyle = '#f1c40f'; ctx.fillText(txtObj.text, txtObj.x, txtObj.y);
+        });
+
+        ctx.font = 'bold 26px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        entities.forEach(ent => {
+            ctx.fillStyle = ent.type === 'O' ? '#00bfff' : '#ff4444';
+            ctx.strokeStyle = '#000000'; ctx.lineWidth = 3;
+            ctx.strokeText(ent.type, ent.x, ent.y); ctx.fillText(ent.type, ent.x, ent.y);
+        });
+    }
+
+    function getPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        return { x: (e.clientX - rect.left) * (canvas.width / rect.width), y: (e.clientY - rect.top) * (canvas.height / rect.height) };
+    }
+
+    function handlePointerDown(e) {
+        if (!e.isPrimary) return;
+        canvas.setPointerCapture(e.pointerId);
+        const pos = getPos(e);
+        
+        if(mode === 'draw') { isDrawing = true; currentPath = [pos]; } 
+        else if(mode === 'o' || mode === 'x') {
+            entities.push({type: mode.toUpperCase(), x: pos.x, y: pos.y});
+            saveState(); drawAll();
+        } else if(mode === 'text') {
+            const val = document.getElementById('customTextInput').value;
+            if (val.trim() !== "") {
+                customTexts.push({text: val, x: pos.x, y: pos.y});
+                saveState(); drawAll();
+            }
+        }
+    }
+
+    function handlePointerMove(e) {
+        if(!isDrawing || mode !== 'draw' || !e.isPrimary) return;
+        currentPath.push(getPos(e));
+        drawAll(); 
+        ctx.beginPath(); ctx.moveTo(currentPath[0].x, currentPath[0].y);
+        for(let i=1; i<currentPath.length; i++) ctx.lineTo(currentPath[i].x, currentPath[i].y);
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.stroke();
+    }
+
+    function handlePointerUp(e) {
+        if (!e.isPrimary) return;
+        canvas.releasePointerCapture(e.pointerId);
+        if(isDrawing && mode === 'draw') {
+            if(currentPath.length > 1) { paths.push(currentPath); saveState(); }
+            isDrawing = false; drawAll();
+        }
+    }
+
+    canvas.addEventListener('pointerdown', handlePointerDown);
+    canvas.addEventListener('pointermove', handlePointerMove);
+    canvas.addEventListener('pointerup', handlePointerUp);
+    canvas.addEventListener('pointercancel', handlePointerUp);
+
+    // INIT
+    showLandingPage();
+</script>
+</body>
+</html>
